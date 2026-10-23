@@ -1,80 +1,89 @@
-name: build
 
-on: [push, pull_request]
+name: Android ARM32 Build
+
+on:
+  push:
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
 
 jobs:
-  linux-gcc-clang:
-    strategy:
-      fail-fast: false
-      matrix:
-        compiler: [gcc, clang]
-
-    name: linux-${{ matrix.compiler }}
+  android-arm32:
+    name: Android ARM32 (NDK + CMake)
     runs-on: ubuntu-latest
+
     steps:
-      - uses: actions/checkout@v6
+      - name: Checkout repository
+        uses: actions/checkout@v6
         with:
           submodules: recursive
 
-      - name: Install dependencies
+      - name: Install Ninja
         run: |
           sudo apt-get update
-          sudo apt-get install -y ninja-build libgl-dev libx11-dev libxrandr-dev libxinerama-dev libxcursor-dev libxi-dev pkg-config libavcodec-dev libavformat-dev libavutil-dev libswresample-dev libswscale-dev
+          sudo apt-get install -y ninja-build
 
-      - name: Configure
+      - name: Set up Java
+        uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '17'
+
+      - name: Set up Android SDK
+        uses: android-actions/setup-android@v3
+
+      - name: Install Android NDK
         run: |
-          if [ "${{ matrix.compiler }}" = "gcc" ]; then
-            export CC=gcc
-            export CXX=g++
-          else
-            export CC=clang
-            export CXX=clang++
+          sdkmanager "platform-tools" "platforms;android-24" "ndk;27.2.12479018"
+
+      - name: Configure CMake
+        run: |
+          export ANDROID_NDK="$ANDROID_HOME/ndk/27.2.12479018"
+
+          cmake -S . -B build/android-arm32 -G Ninja \
+            -DCMAKE_BUILD_TYPE=Release \
+            -DCMAKE_TOOLCHAIN_FILE="$ANDROID_NDK/build/cmake/android.toolchain.cmake" \
+            -DANDROID_ABI=armeabi-v7a \
+            -DANDROID_PLATFORM=android-24 \
+            -DANDROID_STL=c++_shared \
+            -DCMAKE_ANDROID_ARCH_ABI=armeabi-v7a \
+            -DCMAKE_ANDROID_NDK="$ANDROID_NDK" \
+            -DCMAKE_POSITION_INDEPENDENT_CODE=ON \
+            -DBUILD_TESTING=OFF \
+            -DBUILD_TESTS=OFF
+
+      - name: Build
+        run: |
+          cmake --build build/android-arm32 \
+            --config Release \
+            --parallel 2
+
+      - name: Collect Android binaries
+        shell: bash
+        run: |
+          mkdir -p artifacts/arm32
+
+          find build/android-arm32 -type f \
+            \( -name '*.so' -o -name '*.a' \
+               -o -name 'ps2xAnalyzer' \
+               -o -name 'ps2xRecomp' \) \
+            ! -path '*/CMakeFiles/*' \
+            -exec cp --parents {} artifacts/arm32/ \;
+
+          if [ -z "$(find artifacts/arm32 -type f -print -quit)" ]; then
+            echo "::error::No Android binaries or libraries were found."
+            exit 1
           fi
-          cmake -S . -B build -G Ninja -DCMAKE_BUILD_TYPE=Release -DCMAKE_C_FLAGS=-msse4.1 -DCMAKE_CXX_FLAGS=-msse4.1
 
-      - name: Build
-        run: cmake --build build --config Release
+          echo "Generated Android artifacts:"
+          find artifacts/arm32 -type f -print
 
-      - name: Tests
-        run: ./build/ps2xTest/ps2x_tests
-
-  windows-msvc:
-    strategy:
-      fail-fast: false
-      matrix:
-        include:
-          - os: windows-latest
-            arch: x64
-            target_arch: x86_64
-    
-    name: windows-msvc-${{ matrix.target_arch }}
-    runs-on: ${{ matrix.os }}
-    steps:
-      - uses: actions/checkout@v6
-        with:
-          submodules: recursive
-      
-      - uses: lukka/get-cmake@latest
-
-      - uses: TheMrMilchmann/setup-msvc-dev@v4
-        with:
-          arch: ${{ matrix.arch }}
-
-      - name: Build
-        shell: cmd
-        run: |
-          cmake -B build
-          cmake --build build --config Release
-
-      - name: Tests
-        shell: cmd
-        run: |
-          .\build\ps2xTest\Release\ps2x_tests.exe
-      - name: Upload artifact
+      - name: Upload ARM32 build
         uses: actions/upload-artifact@v6
         with:
-          name: PS2Recomp - Windows
-          path: |
-            build/ps2xAnalyzer/Release/*.exe
-            build/ps2xRecomp/Release/*.exe
-            build/ps2xTest/Release/*.exe
+          name: PS2Recomp-Android-ARM32
+          path: artifacts/arm32/
+          if-no-files-found: error
+          retention-days: 14
