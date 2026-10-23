@@ -15,7 +15,7 @@ jobs:
 
     steps:
       - name: Checkout repository
-        uses: actions/checkout@v6
+        uses: actions/checkout@v4
         with:
           submodules: recursive
 
@@ -31,26 +31,31 @@ jobs:
           java-version: '17'
 
       - name: Set up Android SDK
-        uses: android-actions/setup-android@v4
+        uses: android-actions/setup-android@v3
         with:
           packages: 'platform-tools platforms;android-24 ndk;27.2.12479018'
 
       - name: Configure CMake
         shell: bash
         run: |
-          export ANDROID_NDK="$ANDROID_HOME/ndk/27.2.12479018"
+          set -euo pipefail
 
-          if [ ! -f "$ANDROID_NDK/build/cmake/android.toolchain.cmake" ]; then
-            echo "::error::Android NDK toolchain not found: $ANDROID_NDK"
+          export ANDROID_NDK="$ANDROID_HOME/ndk/27.2.12479018"
+          TOOLCHAIN="$ANDROID_NDK/build/cmake/android.toolchain.cmake"
+
+          if [ ! -f "$TOOLCHAIN" ]; then
+            echo "::error::Android NDK toolchain not found: $TOOLCHAIN"
             exit 1
           fi
 
-          cmake -S . -B build/android-arm32 -G Ninja \
+          rm -rf out/build
+
+          cmake -S . -B out/build -G Ninja \
             -DCMAKE_BUILD_TYPE=Release \
-            -DCMAKE_TOOLCHAIN_FILE="$ANDROID_NDK/build/cmake/android.toolchain.cmake" \
+            -DCMAKE_TOOLCHAIN_FILE="$TOOLCHAIN" \
             -DANDROID_ABI=armeabi-v7a \
             -DANDROID_PLATFORM=android-24 \
-            -DANDROID_STL=c++_shared \
+            -DANDROID_STL=c++_static \
             -DCMAKE_ANDROID_ARCH_ABI=armeabi-v7a \
             -DCMAKE_ANDROID_NDK="$ANDROID_NDK" \
             -DCMAKE_POSITION_INDEPENDENT_CODE=ON \
@@ -58,37 +63,38 @@ jobs:
             -DBUILD_TESTS=OFF
 
       - name: Build
+        shell: bash
         run: |
-          cmake --build build/android-arm32 \
+          set -euo pipefail
+
+          cmake --build out/build \
             --config Release \
             --parallel 2
 
-      - name: Collect Android binaries
+      - name: Verify build outputs
         shell: bash
         run: |
-          mkdir -p artifacts/arm32
+          set -euo pipefail
 
-          find build/android-arm32 -type f \
-            \( -name '*.so' \
-               -o -name '*.a' \
-               -o -name 'ps2xAnalyzer' \
-               -o -name 'ps2xRecomp' \) \
-            ! -path '*/CMakeFiles/*' \
-            -exec cp --parents {} artifacts/arm32/ \;
-
-          if [ -z "$(find artifacts/arm32 -type f -print -quit)" ]; then
-            echo "::error::No Android binaries or libraries were found."
+          if [ ! -f out/build/build.ninja ]; then
+            echo "::error::Ninja build files were not generated."
             exit 1
           fi
 
           echo "Generated files:"
-          find artifacts/arm32 -type f -print
+          find out/build -maxdepth 3 -type f \
+            \( -name 'ps2_recomp' \
+               -o -name 'ps2xRecomp' \
+               -o -name 'ps2xAnalyzer' \
+               -o -name '*.a' \
+               -o -name '*.so' \) \
+            -print
 
-      - name: Upload ARM32 build
-        uses: actions/upload-artifact@v6
+      - name: Upload complete Android ARM32 build
+        uses: actions/upload-artifact@v4
         with:
           name: PS2Recomp-Android-ARM32
-          path: artifacts/arm32/
+          path: out/build/
           if-no-files-found: error
+          include-hidden-files: true
           retention-days: 14
-          
