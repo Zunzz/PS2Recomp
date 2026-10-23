@@ -1,3 +1,4 @@
+
 name: Android ARM32 Build
 
 on:
@@ -71,30 +72,48 @@ jobs:
             --config Release \
             --parallel 2
 
-      - name: Verify build outputs
+      - name: Collect executables
         shell: bash
         run: |
           set -euo pipefail
 
-          if [ ! -f out/build/build.ninja ]; then
-            echo "::error::Ninja build files were not generated."
+          mkdir -p artifacts
+
+          COUNT=0
+
+          while IFS= read -r -d '' BIN; do
+            DEST="artifacts/${BIN#out/build/}"
+
+            mkdir -p "$(dirname "$DEST")"
+            cp "$BIN" "$DEST"
+            chmod +x "$DEST"
+
+            echo "Collected: $BIN -> $DEST"
+            COUNT=$((COUNT + 1))
+          done < <(
+            find out/build \
+              -type f \
+              -name 'ps2_recomp' \
+              ! -path '*/CMakeFiles/*' \
+              -print0
+          )
+
+          if [ "$COUNT" -eq 0 ]; then
+            echo "::error::No ps2_recomp executables found in out/build"
             exit 1
           fi
 
-          echo "Generated files:"
-          find out/build -maxdepth 3 -type f \
-            \( -name 'ps2_recomp' \
-               -o -name 'ps2xRecomp' \
-               -o -name 'ps2xAnalyzer' \
-               -o -name '*.a' \
-               -o -name '*.so' \) \
-            -print
+          echo "Total executables collected: $COUNT"
+          echo "Collected files:"
+          find artifacts -type f -print
 
-      - name: Upload complete Android ARM32 build
+          echo "Total artifact size:"
+          du -sh artifacts
+
+      - name: Upload Android executables
         uses: actions/upload-artifact@v4
         with:
           name: PS2Recomp-Android-ARM32
-          path: out/build/
+          path: artifacts/
           if-no-files-found: error
-          include-hidden-files: true
           retention-days: 14
