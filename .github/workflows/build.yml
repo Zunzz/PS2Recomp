@@ -72,48 +72,46 @@ jobs:
             --config Release \
             --parallel 2
 
-      - name: Collect executables
+      - name: Collect all build files
         shell: bash
         run: |
           set -euo pipefail
 
           mkdir -p artifacts
 
-          COUNT=0
-
-          while IFS= read -r -d '' BIN; do
-            DEST="artifacts/${BIN#out/build/}"
-
-            mkdir -p "$(dirname "$DEST")"
-            cp "$BIN" "$DEST"
-            chmod +x "$DEST"
-
-            echo "Collected: $BIN -> $DEST"
-            COUNT=$((COUNT + 1))
-          done < <(
-            find out/build \
-              -type f \
-              -name 'ps2_recomp' \
-              ! -path '*/CMakeFiles/*' \
-              -print0
+          DIRECTORIES=(
+            "out/build/ps2xAnalyzer"
+            "out/build/ps2xRuntime"
+            "out/build/ps2xIOP"
+            "out/build/ps2xRecomp"
           )
 
-          if [ "$COUNT" -eq 0 ]; then
-            echo "::error::No ps2_recomp executables found in out/build"
-            exit 1
-          fi
+          for DIR in "${DIRECTORIES[@]}"; do
+            if [ ! -d "$DIR" ]; then
+              echo "::error::Directory not found: $DIR"
+              exit 1
+            fi
 
-          echo "Total executables collected: $COUNT"
+            DEST="artifacts/$DIR"
+
+            mkdir -p "$DEST"
+            cp -a "$DIR/." "$DEST/"
+
+            echo "Collected: $DIR"
+          done
+
+          echo ""
           echo "Collected files:"
           find artifacts -type f -print
 
+          echo ""
           echo "Total artifact size:"
           du -sh artifacts
 
-      - name: Upload Android executables
+      - name: Upload all build files
         uses: actions/upload-artifact@v4
         with:
-          name: PS2Recomp-Android-ARM32
+          name: PS2Recomp-Android-ARM32-All-Files
           path: artifacts/
           if-no-files-found: error
           retention-days: 14
